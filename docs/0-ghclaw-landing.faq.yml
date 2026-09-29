@@ -10,8 +10,8 @@ data:
           en: What is ghclaw?
           cn: 什么是 ghclaw？
         answer:
-          en: A folder-based event listener pattern for GitHub events. Watches a folder for event files, classifies them by event type (issue#comment, pr#opened, etc.), and routes them to AI-assisted handlers via x chat / x pi / x codex.
-          cn: 用于 GitHub 事件的基于文件夹的事件监听器模式。监听一个文件夹中的事件文件，按事件类型（issue#comment、pr#opened 等）分类，再通过 x chat / x pi / x codex 路由到 AI 辅助的处理器。
+          en: ghclaw is an x-cmd module (x ghclaw) — a "claw design" for GitHub events. A background listener polls the GitHub Events API for a repo / org / user target, appends each new event to an on-disk append-only MQ (one TSV line plus one JSON file per event), and a consumer dispatches events to built-in AI agents that post results back via gh api. No webhook or admin rights required.
+          cn: ghclaw 是一个 x-cmd 模块（x ghclaw）——面向 GitHub 事件的 "claw 设计"。后台监听进程轮询指定 仓库/组织/用户 的 GitHub Events API，把每个新事件追加到磁盘上的只追加 MQ（每事件一行 TSV 加一份 JSON 文件），消费端把事件派发给内置 AI 智能体，结果通过 gh api 发回 GitHub。无需 webhook，无需管理员权限。
         confidence: 9
         reference:
           - docs/0-ghclaw-landing.en.md
@@ -22,8 +22,8 @@ data:
           en: What is a "claw design"?
           cn: 什么是 "claw 设计"？
         answer:
-          en: A four-piece pattern: watcher (polls / subscribes), classifier (turns raw events into typed envelopes), handlers (small per-event-type scripts), notifier (sends replies back to upstream). ghclaw is a concrete instance for GitHub events.
-          cn: 一个四件套模式：监听器（轮询 / 订阅）、分类器（把原始事件转为类型化信封）、处理器（每个事件类型一个的小脚本）、通知器（把回复发回上游）。ghclaw 是该模式在 GitHub 事件上的具体实例。
+          en: A four-piece event pattern — watcher (the listen worker polling the Events API with conditional requests), classifier (the watchevent dispatcher parsing each MQ line), handlers (built-in AI triage/reply, or your own via ___X_CMD_GHCLAW_TAILER_HANDLE), notifier (results posted back to GitHub as comments/labels/reactions). Each event is "grabbed" and either dropped, replied to, or escalated.
+          cn: 一个四件套事件模式：监听器（listen worker，条件请求轮询 Events API）、分类器（watchevent 派发器，解析每行 MQ）、处理器（内置 AI triage/reply，或经 ___X_CMD_GHCLAW_TAILER_HANDLE 换成你自己的）、通知器（结果作为评论/标签/reaction 发回 GitHub）。每个事件被"抓取"后，或被丢弃、或被回复、或被升级。
         confidence: 9
         reference:
           - docs/0-ghclaw-landing.en.md
@@ -33,8 +33,8 @@ data:
           en: Who is ghclaw for?
           cn: ghclaw 是给谁用的？
         answer:
-          en: Anyone who wants AI-assisted GitHub triage / PR review without writing a server. Especially useful when you want one watcher for every event type and prefer debuggable file flow over event-loop boilerplate.
-          cn: 想要 AI 辅助 GitHub 分类 / PR 评审又不想写服务器的人。当你想用一个监听器处理每种事件类型，并偏好可调试的文件流而非事件循环样板时尤其有用。
+          en: Anyone who wants AI-assisted GitHub triage or auto-reply without running a server or configuring webhooks — including repos they don't admin, since polling only needs read access. Also anyone who wants an inspectable, replayable event flow as plain files.
+          cn: 想要 AI 辅助 GitHub 分类或自动回复、又不想跑服务器或配 webhook 的人——包括监听自己没有管理员权限的仓库（轮询只需读权限）。也适合希望事件流以纯文件形式可检视、可重放的人。
         confidence: 9
         reference:
           - docs/0-ghclaw-landing.en.md
@@ -43,35 +43,94 @@ data:
       en: how it works
       cn: 工作原理
     qa:
-      - id: folder-layout
+      - id: how-does-listen-work
         question:
-          en: What does the watched folder look like?
-          cn: 被监听的文件夹长什么样？
+          en: How does the listener pick up events?
+          cn: 监听器是怎么拿到事件的？
         answer:
-          en: watched/<owner>/<repo>/events/<ts>-<kind>-<id>.txt for incoming events; watched/<owner>/<repo>/replies/<ts>-reply.txt for replies. ghclaw parses the filename to classify the event.
-          cn: 输入事件用 watched/<owner>/<repo>/events/<ts>-<kind>-<id>.txt；回复用 watched/<owner>/<repo>/replies/<ts>-reply.txt。ghclaw 解析文件名来分类事件。
+          en: Each interval (default 60s, human time like 30s/1min/2h30m) the listen worker sends one conditional request (ETag / If-Modified-Since) to the GitHub Events API. Idle periods return 304 and cost nothing. When the timeline changes, it walks events newest-to-oldest, stops at the stored cursor event id (exact match — ids are per-type numbered, never compare numerically), and appends each new event as one TSV line to the MQ plus a pretty JSON file under data/<owner>/<repo>/<type>.<id>.json.
+          cn: 每个轮询周期（默认 60s，支持 30s/1min/2h30m 等人性化时间）listen worker 向 GitHub Events API 发一次条件请求（ETag / If-Modified-Since）。空闲周期返回 304，零成本。时间线变化时，从新到旧扫描事件，在保存的 cursor 事件 id 处停止（精确匹配——id 按类型独立编号，绝不能数值比较），然后把每个新事件作为一行 TSV 追加进 MQ，并写一份 pretty JSON 到 data/<owner>/<repo>/<type>.<id>.json。
         confidence: 9
         reference:
           - docs/0-ghclaw-landing.en.md
 
-      - id: event-types
+      - id: what-is-the-mq
         question:
-          en: Which GitHub events does ghclaw recognize?
-          cn: ghclaw 识别哪些 GitHub 事件？
+          en: What is the MQ?
+          cn: MQ 是什么？
         answer:
-          en: issue#created, issue#comment, issue#closed, pr#opened, pr#comment, pr#review, pr#merged, push, release, workflow_run, star, fork. Custom kinds supported via --on handlers.
-          cn: issue#created、issue#comment、issue#closed、pr#opened、pr#comment、pr#review、pr#merged、push、release、workflow_run、star、fork。通过 --on 处理器支持自定义类型。
+          en: An append-only TSV file at data/<target>/.mq/MQ.CURRENT/data.tsv under $X_CMD_ROOT_TMP/ghclaw/events/. One event per line — created_at, id, type, action, repo, actor, number, title, detail, plus type-specific trailing columns (when a body is present it is always the last column). Consumers read it with their own cursor — multi-consumer and replay come for free.
+          cn: 一个只追加 TSV 文件，位于 $X_CMD_ROOT_TMP/ghclaw/events/data/<target>/.mq/MQ.CURRENT/data.tsv。每个事件一行：created_at、id、type、action、repo、actor、number、title、detail，再加按类型追加的尾列（有正文时正文恒为最后一列）。消费者自带游标读取——多消费者与重放是天然能力。
         confidence: 9
         reference:
           - docs/0-ghclaw-landing.en.md
 
-      - id: handler-types
+      - id: event-coverage
         question:
-          en: What can a handler be?
-          cn: 处理器可以是？
+          en: Which GitHub events does ghclaw see?
+          cn: ghclaw 能看到哪些 GitHub 事件？
         answer:
-          en: Plain shell, AI via x chat (general), AI via x pi (issue-triage), or AI via x codex (PR review-style). Handlers are just shell scripts that read the event and write a reply.
-          cn: 纯 shell、通过 x chat（通用）、通过 x pi（issue 分类）、或通过 x codex（PR 评审风格）的 AI。处理器就是读取事件并写回复的 shell 脚本。
+          en: The ~17 types of the GitHub Events API — IssuesEvent, IssueCommentEvent, PullRequestEvent, PullRequestReviewEvent, PullRequestReviewCommentEvent, PushEvent, ReleaseEvent, ForkEvent, WatchEvent, CreateEvent/DeleteEvent, CommitCommentEvent, DiscussionEvent, GollumEvent, MemberEvent, PublicEvent, SponsorshipEvent. Actions are a subset of the webhook set — e.g. IssueCommentEvent only has 'created'.
+          cn: GitHub Events API 的约 17 种类型：IssuesEvent、IssueCommentEvent、PullRequestEvent、PullRequestReviewEvent、PullRequestReviewCommentEvent、PushEvent、ReleaseEvent、ForkEvent、WatchEvent、CreateEvent/DeleteEvent、CommitCommentEvent、DiscussionEvent、GollumEvent、MemberEvent、PublicEvent、SponsorshipEvent。action 是 webhook 集合的子集——如 IssueCommentEvent 只有 'created'。
+        confidence: 9
+        reference:
+          - docs/0-ghclaw-landing.en.md
+
+      - id: fresh-start-semantics
+        question:
+          en: What happens when the listener restarts?
+          cn: 监听重启会发生什么？
+        answer:
+          en: A fresh listener starts blind. It clears the target's poll state (cursor/etag/lms), records the NEWEST event id as the cursor, and does not backfill history — ghclaw only sees events that occur while a listener runs (offline = blind, like a webhook). The MQ never shrinks and the built-in tailer resumes from its own index; handlers are still idempotent (footers + eyes reaction) in case lines are re-read by any tool.
+          cn: 新起的监听是盲启动。它会清掉该 target 的轮询状态（cursor/etag/lms），把*最新*事件 id 记为 cursor，不重放历史——ghclaw 只看到监听运行期间发生的事件（停机即盲，与 webhook 相同）。MQ 只增不减，内置 tailer 从自己的 index 续读；处理器仍带幂等标记（页脚 + eyes reaction），以防行被任何工具重复读取。
+        confidence: 9
+        reference:
+          - docs/0-ghclaw-landing.en.md
+
+  - name:
+      en: ai handlers
+      cn: AI 处理器
+    qa:
+      - id: ai-triage
+        question:
+          en: What does the AI triage handler do?
+          cn: AI 分类（triage）处理器做什么？
+        answer:
+          en: On IssuesEvent(opened) it classifies the new issue with x ai triage and posts a comment with priority/area/tldr plus suggested labels, then applies the labels via gh api. Safeguards — skips issues that already have labels; skips if a 'Triaged by ghclaw' footer already exists (idempotent across restarts); the AI may only pick from the repo's existing label vocabulary — labels are never auto-created (a zero-label repo is seeded once with a fixed human-curated taxonomy).
+          cn: 在 IssuesEvent(opened) 上用 x ai triage 分类新 issue，发出带 priority/area/tldr 与建议标签的评论，并通过 gh api 应用标签。保护机制：已带标签的 issue 跳过；已有 'Triaged by ghclaw' 页脚则跳过（跨重启幂等）；AI 只能从仓库已有标签词表中选择——绝不自动创建标签（零标签仓库一次性播种固定人工分类法）。
+        confidence: 9
+        reference:
+          - docs/0-ghclaw-landing.en.md
+
+      - id: ai-reply
+        question:
+          en: How does the @x auto-reply work?
+          cn: "@x 自动回复是怎么工作的？"
+        answer:
+          en: IssuesEvent(opened) or IssueCommentEvent(created) whose body contains @x (strict word boundaries; change with GHCLAW_REPLY_KEYWORD) triggers x ai reply. The coarse filter reads only the MQ line (zero file IO); only on a keyword hit does it fetch the event JSON for context. Language is auto-detected (CJK -> zh-CN, else en). The reply is posted with a 'Replied by ghclaw' footer, and an eyes reaction on the triggering comment/issue marks it handled. Failures warn and skip.
+          cn: 正文含 @x 的 IssuesEvent(opened) 或 IssueCommentEvent(created)（严格词边界；可用 GHCLAW_REPLY_KEYWORD 修改）触发 x ai reply。粗筛只读 MQ 行（零文件 IO）；只有关键词命中才反查事件 JSON 拿上下文。语言自动检测（含 CJK → zh-CN，否则 en）。回复带 'Replied by ghclaw' 页脚发出，并在触发的评论/issue 上打 eyes reaction 作为已处理标记。失败只告警跳过。
+        confidence: 9
+        reference:
+          - docs/0-ghclaw-landing.en.md
+
+      - id: anti-loop
+        question:
+          en: How does ghclaw prevent reply loops and duplicates?
+          cn: ghclaw 如何防止回复回环与重复处理？
+        answer:
+          en: Three layers — (1) events from actors ending in [bot] are skipped; (2) anything already containing a ghclaw footer ('Replied by ghclaw' / 'Triaged by ghclaw') is skipped — the Events API can't see comment edits/deletes, so footers identify ghclaw's own work; (3) the trigger object carrying an eyes reaction means already-handled, surviving restarts and MQ replays.
+          cn: 三层：① actor 以 [bot] 结尾的事件跳过；② 已含 ghclaw 页脚（'Replied by ghclaw' / 'Triaged by ghclaw'）的跳过——Events API 看不到评论编辑/删除，页脚是识别自己作品的方式；③ 触发对象上的 eyes reaction 表示已处理，跨重启与 MQ 重放均有效。
+        confidence: 9
+        reference:
+          - docs/0-ghclaw-landing.en.md
+
+      - id: auth
+        question:
+          en: What authentication does ghclaw need?
+          cn: ghclaw 需要什么认证？
+        answer:
+          en: GH_TOKEN or GITHUB_TOKEN that can read the watched repos; your gh login state also works. If the gh binary is missing, ghclaw can fetch one via 'x env use gh'. Tokens are never exported — each gh call receives the token as a one-shot environment prefix so it can't leak into your session's child processes.
+          cn: 需要能读被监听仓库的 GH_TOKEN 或 GITHUB_TOKEN；gh 的登录态也可用。若缺 gh 二进制，ghclaw 可通过 'x env use gh' 现场获取。token 绝不 export——每次 gh 调用以单次 env 前缀传入，不会泄漏进会话的子进程。
         confidence: 9
         reference:
           - docs/0-ghclaw-landing.en.md
@@ -82,59 +141,105 @@ data:
     qa:
       - id: how-to-start
         question:
-          en: How do I start ghclaw?
-          cn: 如何启动 ghclaw？
+          en: How do I start watching a repo?
+          cn: 如何开始监听一个仓库？
         answer:
-          en: Forward GitHub webhooks into a watched folder (e.g. via a Cloudflare Worker), then run ghclaw run ./watched/ with --on flags per event kind. Run under systemd / tmux / supervisord / a container.
-          cn: 把 GitHub webhook 转发到被监听的文件夹（例如通过 Cloudflare Worker），然后跑 ghclaw run ./watched/ 并按事件类型加 --on 标志。在 systemd / tmux / supervisord / 容器下运行。
+          en: export GH_TOKEN=<token>, then 'x ghclaw run --repo owner/repo' for a foreground all-in-one (listen + consume + stop, teardown on exit), or split it — 'x ghclaw listen --repo owner/repo' (background writer) plus 'x ghclaw consume --repo owner/repo' (foreground AI dispatch, Ctrl-C to exit). Manage with 'x ghclaw ls' and 'x ghclaw stop <target>'.
+          cn: 先 export GH_TOKEN=<token>，然后 'x ghclaw run --repo owner/repo' 一站式前台运行（listen + consume + stop，退出即拆除）；或拆成 'x ghclaw listen --repo owner/repo'（后台写）加 'x ghclaw consume --repo owner/repo'（前台 AI 派发，Ctrl-C 退出）。用 'x ghclaw ls' 与 'x ghclaw stop <target>' 管理。
         confidence: 9
         reference:
           - docs/0-ghclaw-landing.en.md
 
-      - id: custom-handlers
+      - id: target-kinds
         question:
-          en: Can I write custom handlers?
-          cn: 我能写自定义处理器吗？
+          en: What target kinds can I watch?
+          cn: 可以监听哪些目标类型？
         answer:
-          en: Yes — handlers are plain shell scripts. Read the event from $1 or stdin, write the reply to stdout or to watched/<owner>/<repo>/replies/. Wire in with ghclaw run --on "<kind>" <script>.
-          cn: 能 —— 处理器就是纯 shell 脚本。从 $1 或 stdin 读取事件，把回复写到 stdout 或 watched/<owner>/<repo>/replies/。用 ghclaw run --on "<kind>" <script> 接入。
+          en: Three selectors — --repo owner/repo (single repo, public or private as the token permits); --org <org> (whole organization, PUBLIC events only — private repos still need per-repo listening); --user <name> (the user's own actor-centric activity stream — what the user triggered, not what happened in their repos). --interval takes human time (default 60s); targets are normalized to lowercase.
+          cn: 三种选择器：--repo owner/repo（单仓，公共或私有取决于 token 权限）；--org <org>（整个组织，仅公共事件——私有仓仍需逐仓监听）；--user <name>（该用户以人为中心的动态流——其本人触发的事件，而非其仓库里发生的事）。--interval 接受人性化时间（默认 60s）；target 统一规范为小写。
         confidence: 9
         reference:
           - docs/0-ghclaw-landing.en.md
 
-      - id: notifications
+      - id: custom-consumers
         question:
-          en: Where do replies go?
-          cn: 回复发到哪里？
+          en: Can I write my own event consumer?
+          cn: 我能写自己的事件消费者吗？
         answer:
-          en: Replies can flow back as GitHub comments (via the GitHub API), x weixin messages (WeChat), local queue / log writes, or webhook posts. Multiple channels can be combined per event type.
-          cn: 回复可以通过 GitHub 评论（通过 GitHub API）、x weixin 消息（微信）、本地队列 / 日志写入、或 webhook POST 发回。每个事件类型可组合多个通道。
+          en: Two ways. (1) Read the MQ file directly — data/<target>/.mq/MQ.CURRENT/data.tsv is an append-only TSV; keep your own cursor in any language (python, awk, ...). (2) Export ___X_CMD_GHCLAW_TAILER_HANDLE=<func> before running consume — each raw MQ line goes to your function instead of the built-in pipeline (peel -> guards -> triage -> reply). The MQ file is untouched either way.
+          cn: 两种方式。① 直接读 MQ 文件——data/<target>/.mq/MQ.CURRENT/data.tsv 是只追加 TSV；用任何语言（python、awk……）自带游标读取。② 运行 consume 前 export ___X_CMD_GHCLAW_TAILER_HANDLE=<函数名>：每条原始 MQ 行改调你的函数，替代内置流水线（剥列 → 粗筛 → triage → reply）。两种方式 MQ 文件本身都不受影响。
         confidence: 9
         reference:
           - docs/0-ghclaw-landing.en.md
+
+      - id: are-builtins-the-product
+        question:
+          en: Are the built-in AI handlers the main feature of ghclaw?
+          cn: 内置 AI 处理器是 ghclaw 的主要功能吗？
+        answer:
+          en: No — they are a simple default set that ships out of the box and will keep evolving (more handlers, more triggers). The main path is your own processing — read the MQ from Python or any language, or replace the dispatcher with ___X_CMD_GHCLAW_TAILER_HANDLE. The MQ contract is the stable interface.
+          cn: 不是——它们只是开箱即用的一套简单默认方案，会持续演进（更多处理器、更多触发条件）。主路径是你自己的处理流程——用 Python 或任何语言读 MQ，或用 ___X_CMD_GHCLAW_TAILER_HANDLE 替换整个派发器。MQ 契约才是稳定的接口。
+        confidence: 9
+        reference:
+          - docs/0-ghclaw-landing.en.md
+          - docs/1-ghclaw-mq-custom-consumer.en.md
 
   - name:
       en: limits
       cn: 限制
     qa:
+      - id: mention-detection
+        question:
+          en: Can ghclaw detect when someone @-mentions me?
+          cn: ghclaw 能检测到有人 @ 我吗？
+        answer:
+          en: Not as a first-class signal — the Events API has no mention concept, and watching your own user stream does not help (it is actor-centric; the commenter is the actor, not you). In practice — watch the repos you care about and keyword-match your handle in the comment body (always the last MQ column); a few lines of consumer code do it. True GitHub-wide mention / review-request / CI semantics live only in the Notifications API, which is on the ghclaw roadmap.
+          cn: 不能作为一等信号——Events API 没有 mention 概念，监听自己的 user 流也没用（以人为中心，触发者是评论者而不是你）。实践做法——监听你关心的仓库，在评论正文里关键词匹配你的用户名（正文恒为 MQ 最后一列），几行消费者代码即可。全站范围的 @我 / review 请求 / CI 语义只在 Notifications API 里，已在 ghclaw 路线图上。
+        confidence: 9
+        reference:
+          - docs/0-ghclaw-landing.en.md
+          - docs/2-ghclaw-events-api-playbook.en.md
+
       - id: latency
         question:
           en: Is ghclaw real-time?
           cn: ghclaw 是实时的吗？
         answer:
-          en: No — ghclaw is folder-based. Latency is poll-interval or inotify-latency, not sub-second. For real-time needs, a webhook-direct handler is better.
-          cn: 不是 —— ghclaw 基于文件夹。延迟取决于轮询间隔或 inotify 延迟，不是亚秒级。需要实时性，直接的 webhook 处理器更好。
+          en: No — it polls, default every 60s (configurable). Events API push events lag 10-40 minutes through GitHub's feed pipeline, and the stream can drop events under load (window ~300 events / 30 days). ghclaw warns when it detects a cursor gap. For sub-second or guaranteed delivery, webhooks/GitHub Apps are the right tool.
+          cn: 不是——它是轮询，默认 60s 一次（可配）。Events API 的 push 事件经 GitHub feed 管道延迟 10~40 分钟，高负载时事件流还可能丢事件（窗口约 300 条 / 30 天）。检测到 cursor 缺口时 ghclaw 会告警。需要亚秒级或送达保证的场景应使用 webhook / GitHub App。
         confidence: 9
         reference:
           - docs/0-ghclaw-landing.en.md
 
-      - id: serverless
+      - id: invisible-events
         question:
-          en: Does ghclaw work on serverless platforms?
-          cn: ghclaw 能在无服务器平台上用吗？
+          en: What can't ghclaw see?
+          cn: ghclaw 看不到什么？
         answer:
-          en: Not directly — ghclaw assumes a persistent folder with a watcher process. Use a small VM / container / systemd service for the watcher; webhook forwarding can still be serverless.
-          cn: 不能直接 —— ghclaw 假定一个带监听器进程的持久文件夹。用小型 VM / 容器 / systemd 服务跑监听器；webhook 转发仍可以是无服务器。
+          en: Comment edits and deletes (the Events API only reports 'created'); CI events (check_run / check_suite / status) and workflow_run — those live in webhook-land; and anything outside the Events API's ~17 types. ghclaw recognizes its own replies by footer, but foreign edits are simply invisible.
+          cn: 评论的编辑与删除（Events API 只报 'created'）；CI 事件（check_run / check_suite / status）与 workflow_run——那些属于 webhook 的世界；以及 Events API 约 17 种类型之外的一切。ghclaw 凭页脚认出自己的回复，但别人的编辑改动它看不到。
+        confidence: 9
+        reference:
+          - docs/0-ghclaw-landing.en.md
+
+      - id: stopped-listener
+        question:
+          en: What happens while the listener is stopped?
+          cn: 监听停止期间会发生什么？
+        answer:
+          en: The listener is blind — events that roll past the ~300-event window while it is stopped are lost, and a fresh listener starts at the NEWEST event with no backfill of what's still in the window. stop keeps the MQ and state on disk (use --purge to remove them); the shared per-event JSON files are never touched. A 'since' reconciliation mode is on the roadmap.
+          cn: 停机即盲：停止期间滚过 ~300 条窗口的事件会丢失，而新监听从*最新*事件开始，窗口内残留的内容也不补回。stop 默认保留 MQ 与状态（--purge 才删除）；共享的每事件 JSON 文件永不动。'since' 对账已在路线图上。
+        confidence: 9
+        reference:
+          - docs/0-ghclaw-landing.en.md
+
+      - id: org-limits
+        question:
+          en: What are the limits of org-wide watching?
+          cn: 组织级监听有什么限制？
+        answer:
+          en: The /orgs/<org>/events endpoint returns PUBLIC events only, regardless of token — private repos still need per-repo listening. Busy orgs share one ~300-event window across all repos, so a very active repo can push quieter repos' events out of the window; shortening the interval to 10-30s helps. Massive orgs exceed what polling can cover — org webhooks or a GitHub App are the ceiling.
+          cn: /orgs/<org>/events 端点只返回公共事件，与 token 权限无关——私有仓仍需逐仓监听。繁忙组织的全部仓库共享一个 ~300 条窗口，特别活跃的仓会把安静仓的事件挤出窗口；把间隔缩短到 10~30s 有缓解。超大规模组织会超出轮询的覆盖能力——组织 webhook 或 GitHub App 才是上限。
         confidence: 9
         reference:
           - docs/0-ghclaw-landing.en.md

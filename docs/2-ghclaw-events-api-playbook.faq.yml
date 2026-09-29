@@ -1,0 +1,139 @@
+id: x-g-2-ghclaw-events-api-playbook
+
+data:
+  - name:
+      en: coverage
+      cn: 事件覆盖
+    qa:
+      - id: events-vs-webhook
+        question:
+          en: Is the Events API the same as the webhook event set?
+          cn: Events API 和 webhook 事件是一回事吗？
+        answer:
+          en: No — it is a small read-only projection. Webhooks have 40+ types with the full action set; the Events API has ~17 PascalCase types whose actions are a strict subset (e.g. IssueCommentEvent only has 'created'). Actions `on:` maps to webhooks plus 4 synthetic triggers (schedule, workflow_dispatch, workflow_call, repository_dispatch) that exist in no event stream at all.
+          cn: 不是——它是一个小型只读投影。webhook 有 40+ 类型和完整 action 集；Events API 只有约 17 种 PascalCase 类型，action 是严格子集（如 IssueCommentEvent 只有 'created'）。Actions `on:` 对应 webhook 外加 4 个合成触发器（schedule、workflow_dispatch、workflow_call、repository_dispatch），它们不存在于任何事件流。
+        confidence: 9
+        reference:
+          - docs/2-ghclaw-events-api-playbook.en.md
+
+      - id: invisible-events-2
+        question:
+          en: Which common events are invisible to ghclaw?
+          cn: 哪些常见事件 ghclaw 看不到？
+        answer:
+          en: Comment edits and deletes; CI results (check_run / check_suite / status); workflow_run; @mentions and review requests directed at you (those live in the Notifications API with reasons mention / review_requested / ci_activity); PR synchronize and ready-for-review; plus webhook-only types like label, milestone, deployment, merge_group and dependabot_alert.
+          cn: 评论的编辑与删除；CI 结果（check_run / check_suite / status）；workflow_run；@我 和 请求我 review（那些在 Notifications API 里，reason 为 mention / review_requested / ci_activity）；PR 的 synchronize 和 ready-for-review；以及 label、milestone、deployment、merge_group、dependabot_alert 等仅 webhook 可见的类型。
+        confidence: 9
+        reference:
+          - docs/2-ghclaw-events-api-playbook.en.md
+
+      - id: events-only-types
+        question:
+          en: Are there events only the Events API has?
+          cn: 有只有 Events API 才有的事件吗？
+        answer:
+          en: Yes — SponsorshipEvent (sponsorship received) and MemberEvent (collaborator added). Webhooks carry them too, but Actions cannot trigger on them, so the Events API is the only trigger-less way to watch them — handy for audit-style consumers.
+          cn: 有——SponsorshipEvent（收到赞助）和 MemberEvent（新增协作者）。webhook 里虽也有，但 Actions 不能拿它们当触发器，因此 Events API 是唯一免触发器监听它们的方式，适合做审计型消费者。
+        confidence: 9
+        reference:
+          - docs/2-ghclaw-events-api-playbook.en.md
+
+      - id: user-watch-mentions
+        question:
+          en: If I watch my own user stream, will I see mentions of me?
+          cn: 监听自己的 user 流能看到别人 @ 我吗？
+        answer:
+          en: No. The /users/{name}/events stream contains only events that person triggered — when someone comments with @you, the actor is the commenter, so the event never enters your stream. Watch the repo instead and keyword-match the comment body (always the last MQ column), or wait for the planned Notifications channel (reason=mention).
+          cn: 不能。/users/{name}/events 流只含该用户本人触发的事件——别人评论 @你 时 actor 是对方，事件不会进入你的流。改为监听相关仓库，在评论正文（恒为 MQ 最后一列）里关键词匹配；或等规划中的 Notifications 通道（reason=mention）。
+        confidence: 9
+        reference:
+          - docs/2-ghclaw-events-api-playbook.en.md
+
+      - id: judge-business-events
+        question:
+          en: How do I judge a specific business event from the Events API?
+          cn: 怎么从 Events API 判断具体业务事件？
+        answer:
+          en: Use the judgment matrix — IssuesEvent actions cover the issue lifecycle (opened/closed/reopened/labeled/assigned, closed carries state_reason); IssueCommentEvent created covers new comments and the issue payload's pull_request field separates issue comments from PR comments; PullRequestReviewEvent's verdict is review.state (approved/changes_requested/commented); ReleaseEvent published covers releases; WatchEvent/ForkEvent are self-explanatory. When events are silent, snapshot endpoints with ETag diffing reconstruct state transitions.
+          cn: 用判断矩阵——IssuesEvent 的 action 覆盖 issue 生命周期（opened/closed/reopened/labeled/assigned，closed 带 state_reason）；IssueCommentEvent 的 created 即新评论，issue payload 的 pull_request 字段区分 issue 评论与 PR 评论；PullRequestReviewEvent 的结论看 review.state（approved/changes_requested/commented）；ReleaseEvent 的 published 即发布；WatchEvent/ForkEvent 自明。events 无声时，用快照端点 + ETag diff 重建状态迁移。
+        confidence: 9
+        reference:
+          - docs/2-ghclaw-events-api-playbook.en.md
+
+  - name:
+      en: characteristics
+      cn: 特性
+    qa:
+      - id: delay-and-loss
+        question:
+          en: How delayed and how lossy is the event stream?
+          cn: 事件流有多延迟、多容易丢？
+        answer:
+          en: API and web-UI actions appear in seconds to ~1 minute. Git pushes lag 10-40 minutes through GitHub's feed pipeline. The stream is explicitly not guaranteed under load; each timeline keeps only ~300 events over 30 days; and each poll reads just the first 100-event page, so a bigger burst loses its tail. Treat it as eventually informative, never as an audit ledger.
+          cn: API 和网页操作秒级~1 分钟内出现。git 推送经 feed 管道延迟 10~40 分钟。官方明确高负载不保证送达；每条时间线只保留 30 天内约 300 条；每轮只读第一页 100 条，爆发更大的事件会丢尾部。把它当"最终信息化"，绝不能当审计账本。
+        confidence: 9
+        reference:
+          - docs/2-ghclaw-events-api-playbook.en.md
+
+      - id: fallback-snapshots
+        question:
+          en: What can I do when events lose data?
+          cn: events 丢数据时怎么办？
+        answer:
+          en: Use the snapshot endpoints as designed fallbacks — /issues, /pulls, /issues/{n}/comments, /pulls/{n}/comments, /releases. An ETag conditional request tells you when a snapshot changed; diffing against your last copy reconstructs state transitions (open/closed/merged/draft), comment-count deltas and edit heuristics (updated_at greater than created_at). Deleted comments remain unrecoverable.
+          cn: 用快照端点做设计好的兜底——/issues、/pulls、/issues/{n}/comments、/pulls/{n}/comments、/releases。ETag 条件请求判变，与上次快照 diff 可重建状态迁移（open/closed/merged/draft）、评论计数差和编辑启发式（updated_at 大于 created_at）。被删除的评论仍无法恢复。
+        confidence: 9
+        reference:
+          - docs/2-ghclaw-events-api-playbook.en.md
+
+  - name:
+      en: scopes
+      cn: 范围
+    qa:
+      - id: endpoint-scopes
+        question:
+          en: How do the repo / org / user event endpoints differ?
+          cn: repo / org / user 三个事件端点有何不同？
+        answer:
+          en: /repos/{o}/{r}/events answers 'what happened in this repo' (public or private as the token permits). /orgs/{org}/events answers 'what happened across the org' but returns PUBLIC events only, with one shared ~300-event window — a loud repo can evict a quiet repo's events. /users/{name}/events is actor-centric — only what that person triggered, anywhere on GitHub — so it cannot watch 'everything in the user's repos'.
+          cn: /repos/{o}/{r}/events 回答"这个仓发生了什么"（公共或私有取决于 token）。/orgs/{org}/events 回答"整个组织发生了什么"，但只返回公共事件，且全组织共享一个 ~300 条窗口——活跃仓会把安静仓的事件挤出窗口。/users/{name}/events 以人为中心——只含该用户在全站触发的事件——因此回答不了"其名下仓库的全部动态"。
+        confidence: 9
+        reference:
+          - docs/2-ghclaw-events-api-playbook.en.md
+
+      - id: personal-account-bulk
+        question:
+          en: Can I watch all repos under a personal account in one shot?
+          cn: 能一次监听个人账号下的所有仓库吗？
+        answer:
+          en: No — only organizations have a bulk endpoint. For a personal account you enumerate the repos (GET /users/{name}/repos) and run one per-repo listener each; that also lets you set per-repo intervals. The /users/{name}/events stream is a different thing — the person's own activity across GitHub, useful for 'watch a person' scenarios only.
+          cn: 不能——只有组织有批量端点。个人账号要先枚举仓库（GET /users/{name}/repos），然后每仓一条监听线；这样还能按仓设置不同间隔。/users/{name}/events 是另一回事——该人在全站自己的动态，只适合"盯人"场景。
+        confidence: 9
+        reference:
+          - docs/2-ghclaw-events-api-playbook.en.md
+
+  - name:
+      en: tradeoffs
+      cn: 权衡
+    qa:
+      - id: polling-vs-webhook
+        question:
+          en: When should I pick webhooks over ghclaw's polling?
+          cn: 什么时候该选 webhook 而不是 ghclaw 的轮询？
+        answer:
+          en: Pick webhooks when you manage the repos (admin rights available), need sub-second latency or guaranteed-rich events (CI results, comment edits, workflow_run), and can host a public endpoint that verifies X-Hub-Signature-256 and acks within 10 seconds. Polling wins for repos you don't own, zero-ops setups, and resumable offline tolerance. The documented endgame is hybrid — webhook receivers write the same MQ and polling reconciles their loss.
+          cn: 当你管理这些仓库（有管理员权限）、需要亚秒级延迟或完整丰富的事件（CI 结果、评论编辑、workflow_run）、且能提供验 X-Hub-Signature-256 并在 10 秒内 ack 的公网端点时，选 webhook。轮询赢在：监听不属于你的仓、零运维、离线容忍且可续。路线图的终态是混合——webhook 接收端写同一个 MQ，轮询为它丢的事件做对账。
+        confidence: 9
+        reference:
+          - docs/2-ghclaw-events-api-playbook.en.md
+
+      - id: security-signals
+        question:
+          en: Which events are useful for security monitoring?
+          cn: 哪些事件适合安全监控？
+        answer:
+          en: PublicEvent (private repo just went public — alert immediately), MemberEvent (collaborator added, fires on invitation acceptance — audit who joined which repo), and GollumEvent (wiki edits on sensitive pages like deployment docs — note it cannot see page deletions). All three are Events-API types that Actions cannot trigger on, making ghclaw-style polling a natural fit.
+          cn: PublicEvent（私有仓刚转公开——立即告警）、MemberEvent（新增协作者，邀请被接受时触发——审计谁进了哪个仓库）、GollumEvent（敏感页面如部署文档的 wiki 改动——注意它看不到页面删除）。三者都是 Actions 无法触发的事件，正适合 ghclaw 式轮询。
+        confidence: 9
+        reference:
+          - docs/2-ghclaw-events-api-playbook.en.md

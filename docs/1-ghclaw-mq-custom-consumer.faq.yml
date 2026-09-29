@@ -1,0 +1,157 @@
+id: x-g-1-ghclaw-mq-custom-consumer
+
+data:
+  - name:
+      en: the queue
+      cn: 队列
+    qa:
+      - id: where-is-the-mq
+        question:
+          en: Where is the MQ file?
+          cn: MQ 文件在哪里？
+        answer:
+          en: One append-only TSV per target at $X_CMD_ROOT_TMP/ghclaw/events/data/<target>/.mq/MQ.CURRENT/data.tsv. The exact path is printed when you start 'x ghclaw listen --repo owner/repo'.
+          cn: 每个 target 一份，路径为 $X_CMD_ROOT_TMP/ghclaw/events/data/<target>/.mq/MQ.CURRENT/data.tsv。运行 'x ghclaw listen --repo owner/repo' 时会打印确切路径。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+      - id: mq-line-format
+        question:
+          en: What does one MQ line look like?
+          cn: 一行 MQ 是什么样的？
+        answer:
+          en: Nine TAB-separated fixed columns — created_at, id, type, action, repo, actor, number, title, detail — then type-specific trailing columns. When a body is present it is always the LAST column (comment types put the comment id in the second-to-last column).
+          cn: 9 个 TAB 分隔的定长列——created_at、id、type、action、repo、actor、number、title、detail——之后是按类型追加的尾列。有正文时正文恒为最后一列（评论类的评论 id 在倒数第二列）。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+      - id: detail-column
+        question:
+          en: What is the detail column for?
+          cn: detail 列是干什么的？
+        answer:
+          en: It carries a per-type discriminator so a row reads as a full story without opening the event file — branch names for pushes (tag-prefixed for tags), state:approved for reviews, path:<file> for diff comments, head->base for PRs, label:<name> / assignee:<login>, to:<fork> for forks, page:<name> for wiki, disc:<title> for discussions, commit:<sha7> for commit comments. IssueCommentEvent is empty plus a ',pr' suffix when the comment sits on a PR.
+          cn: 它承载按类型的判别信息，让一行裸读即知全情——push 的分支名（tag 为 tag:）、review 的 state:approved、行内评论的 path:<文件>、PR 的 head->base、label:<名> / assignee:<login>、fork 的 to:<fork 仓>、wiki 的 page:<名>、讨论的 disc:<标题>、commit 评论的 commit:<sha7>。IssueCommentEvent 为空，评论在 PR 上时追加 ',pr' 后缀。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+      - id: event-id-semantics
+        question:
+          en: Can I compare event ids to order events?
+          cn: 能用事件 id 排序事件吗？
+        answer:
+          en: No. GitHub event ids are numbered per event type, not globally monotonic — a PushEvent id around 21.4e9 is larger than a fresh IssueCommentEvent id around 15.2e9. Use exact-match equality only (that is how ghclaw's cursor dedup works), and order by the created_at column instead.
+          cn: 不能。GitHub 事件 id 按类型独立编号，不是全局单调的——约 214 亿号段的 PushEvent 比新的约 152 亿号段 IssueCommentEvent 还大。唯一安全的操作是精确匹配（ghclaw 的 cursor 去重正是这么做的）；排序请用 created_at 列。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+      - id: reverse-lookup
+        question:
+          en: How do I get the full event payload?
+          cn: 怎么拿到事件的完整原文？
+        answer:
+          en: Reverse-lookup the event JSON at $X_CMD_ROOT_TMP/ghclaw/events/data/<owner>/<repo>/<type>.<id>.json — the path is built directly from MQ columns 2 (id), 3 (type) and 5 (repo). The directory is shared across targets because event ids are globally unique; repeated writes of the same event overwrite the same file idempotently.
+          cn: 反查事件 JSON，路径 $X_CMD_ROOT_TMP/ghclaw/events/data/<owner>/<repo>/<type>.<id>.json——由 MQ 第 2 列（id）、第 3 列（type）、第 5 列（repo）直接拼出。目录跨 target 共享，因为事件 id 全局唯一；同一事件重复写入会幂等覆盖同一文件。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+  - name:
+      en: consumers
+      cn: 消费者
+    qa:
+      - id: python-consumer
+        question:
+          en: How do I consume the MQ from Python?
+          cn: 怎么用 Python 消费 MQ？
+        answer:
+          en: Keep your own byte-offset cursor, open the MQ, seek to the offset, iterate appended lines, split each on TAB, filter by type/action/actor, act, and persist the new offset. Design for at-least-once delivery and keep a durable idempotency mark if reprocessing would hurt.
+          cn: 自带字节偏移游标：打开 MQ，seek 到偏移处，迭代新增行，按 TAB 分列，按 type/action/actor 过滤，处理，落盘新偏移。按至少一次语义设计；重放会造成影响时，持久化自己的幂等标记。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+      - id: awk-filtering
+        question:
+          en: Can I just awk the MQ for quick checks?
+          cn: 能直接 awk 过滤 MQ 做快速查看吗？
+        answer:
+          en: Yes — that is the design intent. awk -F'\t' with conditions on $3 (type), $4 (action) and $6 (actor) needs zero file IO. Examples — new human issues use $3=="IssuesEvent" && $4=="opened" && $6 !~ /\[bot\]$/; stars use $3=="WatchEvent"; comment bodies containing a keyword use $3=="IssueCommentEvent" && tolower($NF) ~ /keyword/.
+          cn: 可以——这正是设计意图。awk -F'\t' 对 $3（type）、$4（action）、$6（actor）加条件，零文件 IO。示例——真人新 issue：$3=="IssuesEvent" && $4=="opened" && $6 !~ /\[bot\]$/；star：$3=="WatchEvent"；含关键词的评论正文：$3=="IssueCommentEvent" && tolower($NF) ~ /keyword/。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+      - id: replace-dispatcher
+        question:
+          en: How do I run my own handlers instead of the built-in AI ones?
+          cn: 如何用自己的处理器替换内置 AI 处理器？
+        answer:
+          en: Export ___X_CMD_GHCLAW_TAILER_HANDLE=<func> before running 'x ghclaw consume --repo a/b'. Each raw MQ line is then passed to your function instead of the built-in pipeline. Inside, call ___x_cmd_ghclaw___mq_peel to get the x_mq_* globals and branch on x_mq_etype/x_mq_action. The MQ file itself is untouched — external cursor consumers keep working.
+          cn: 运行 'x ghclaw consume --repo a/b' 前 export ___X_CMD_GHCLAW_TAILER_HANDLE=<函数名>。之后每条原始 MQ 行改调你的函数，不再走内置流水线。函数内调用 ___x_cmd_ghclaw___mq_peel 得到 x_mq_* 全局变量，按 x_mq_etype/x_mq_action 分支。MQ 文件本身不受影响——外部游标消费者照常工作。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+      - id: add-event-type
+        question:
+          en: How do I make ghclaw react to an event it ignores by default?
+          cn: 如何让 ghclaw 响应默认忽略的事件？
+        answer:
+          en: Two ways — read the MQ with your own tool and handle any event type you like (the queue carries all of them), or fork-and-patch the dispatcher — the built-in watchevent is a small case on etype/action; copy lib/consume/_index, add your branch and handler file, and point ___X_CMD_GHCLAW_TAILER_HANDLE at your version.
+          cn: 两种方式——用自己的工具读 MQ，想处理哪种事件类型都行（队列里全都有）；或者改造派发器：内置 watchevent 就是一个按 etype/action 分支的小 case，拷贝 lib/consume/_index，加上你的分支和 handler 文件，再把 ___X_CMD_GHCLAW_TAILER_HANDLE 指向你的版本。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+  - name:
+      en: pitfalls
+      cn: 陷阱
+    qa:
+      - id: legacy-rows
+        question:
+          en: Why did my consumer crash on an old row?
+          cn: 为什么我的消费者在旧行上报错？
+        answer:
+          en: Rows written before 2026-09-23 have no trailing columns — the line ends at column 9. Check the column count before peeling the body, and treat lines with fewer than 9 columns as non-events. Bodies may also be empty (an empty issue body yields an empty last column), which is different from a missing trailing column.
+          cn: 2026-09-23 之前写入的行没有尾列——行到第 9 列为止。剥正文前先数列数，不足 9 列的行当非事件处理。正文也可能是空串（issue 正文为空时最后一列为空），这与"没有尾列"是两回事。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+      - id: content-caveats
+        question:
+          en: Which payload quirks should my consumer know about?
+          cn: 消费端需要知道哪些 payload 怪癖？
+        answer:
+          en: Three — PullRequestEvent.payload.pull_request is shallow (only url/id/number/head/base; no title or state, so the title column is empty for PRs); a batch label-add emits N labeled events whose payload.label is always the LAST label of the batch (the authoritative set is payload.issue.labels in the event JSON); and a JSON null field appears as an empty string in MQ columns while true/false/numbers pass through.
+          cn: 三个——PullRequestEvent.payload.pull_request 是浅对象（只有 url/id/number/head/base，无 title/state，所以 PR 的 title 列为空）；批量加 N 个标签会产生 N 个 labeled 事件，每个的 payload.label 都是批量中最后一个（权威集合在事件 JSON 的 payload.issue.labels）；JSON null 字段在 MQ 列里表现为空串，true/false/数字原样透传。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+      - id: housekeeping-reset
+        question:
+          en: How do I clean up or reset the queue data?
+          cn: 如何清理或重置队列数据？
+        answer:
+          en: Nothing is pruned automatically — the MQ appends forever and event JSON accumulates. Per target, 'x ghclaw stop <target> --purge' removes .state and .mq; a fresh listener then starts blind. The shared event JSON is deduplicated across targets, so prune it per repo (rm -rf data/<owner>/<repo>), never per target. To truncate the MQ, stop the target, truncate or archive data.tsv, delete the tailer index if consumers should restart, and reset any external byte-offset cursors.
+          cn: 没有任何自动清理——MQ 只增不减，事件 JSON 持续累积。按 target 用 'x ghclaw stop <target> --purge' 删除 .state 和 .mq；之后新监听盲启动。事件 JSON 跨 target 去重，只能按仓清理（rm -rf data/<owner>/<repo>），不能按 target。截断 MQ 的步骤：停掉 target，截断或归档 data.tsv，若要让消费者重头来则删除 tailer 的 index，并重置外部消费者的字节偏移游标。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
+
+      - id: delivery-semantics
+        question:
+          en: Is MQ delivery exactly-once?
+          cn: MQ 投递是恰好一次吗？
+        answer:
+          en: No — at-least-once. The MQ is append-only and never shrinks; any consumer may re-read lines, and a listener gap can re-deliver a batch. Keep your own cursor and a durable idempotency mark (the built-in handlers use comment footers and the eyes reaction). Treat replays as a feature — they are what makes debugging and backfill possible.
+          cn: 不是——是至少一次。MQ 只增不减；任何消费者都可能重读行，监听缺口也可能重投整批。自带游标并持久化幂等标记（内置处理器用评论页脚和 eyes reaction）。把重放当特性——调试和补数据全靠它。
+        confidence: 9
+        reference:
+          - docs/1-ghclaw-mq-custom-consumer.en.md
