@@ -1,16 +1,16 @@
 # x-cmd/ghclaw — `ghclaw` landing page
 
-`ghclaw` is a "claw design" for **GitHub events** — a folder-
-based event listener that picks up GitHub events as files and
-routes them through AI-assisted triage, comment, and reply
-actions.
+`ghclaw` is a "claw design" for **GitHub events** — an x-cmd
+module that polls the GitHub Events API into an on-disk
+append-only MQ, then dispatches events to AI-assisted triage
+and reply (a simple default set) or to your own consumers.
 
 > 🌐 **中文版：[README.cn.md](./README.cn.md)** — same content,
 > Chinese front matter.
 
-This repo hosts the canonical landing-page documentation for
-`ghclaw` — what it is, how the claw design works, and how to
-plug in your own handlers. Articles are content-only and open
+This repo hosts the canonical documentation for `ghclaw` —
+what it is, how the claw design works, and how to build your
+own consumers on the MQ. Articles are content-only and open
 for **modification PRs** from anyone — see
 [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
@@ -24,16 +24,20 @@ x-cmd/ghclaw/
 ├── SKILL.md                  # AI-agent recipe
 ├── LICENSE                   # Apache-2.0
 └── docs/
-    ├── 0-ghclaw-landing.{en,cn}.md    # the landing page
+    ├── 0-ghclaw-landing.{en,cn}.md       # the landing page
     ├── 0-ghclaw-landing.llms.md
-    └── 0-ghclaw-landing.faq.yml
+    ├── 0-ghclaw-landing.faq.yml
+    ├── 1-ghclaw-mq-custom-consumer.*     # the MQ protocol + custom consumers
+    └── 2-ghclaw-events-api-playbook.*    # event-source coverage & limits
 ```
 
-`docs/0-ghclaw-landing.{en,cn,llms,faq}.{md,yml}` is the
-canonical four-file landing-page set. The leading integer
-(`0-`) is the reading order; later slots (1-, 2-, …) can be
-added for deeper topics (custom handlers, GitLab/Gitea
-variants, deployment recipes).
+Each slot `n-<slug>` is a canonical four-file set — `{en,cn}.md`
+plus `.llms.md` plus `.faq.yml`. The leading integer is the
+reading order: `0-` is the landing page; `1-` documents the
+MQ protocol for building custom consumers; `2-` maps what the
+GitHub Events API can and cannot deliver. Later slots (3-, …)
+can be added for deeper topics (the webhook channel,
+GitLab/Gitea variants).
 
 ## Sister repos
 
